@@ -17,14 +17,16 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
-	llmClient := llm.NewClient(
-		os.Getenv("LLM_KEY"),
-		"gpt-4o",
-		"https://api.openai.com",
-		logger,
-	)
+	// llmClient := llm.NewClient(
+	// 	os.Getenv("LLM_KEY"),
+	// 	"gpt-4o",
+	// 	"https://api.openai.com",
+	// 	logger,
+	// )
 
-	svc := service.NewService(llmClient, logger)
+	mockClient := llm.NewMockClient()
+
+	svc := service.NewService(mockClient, logger)
 	router := server.NewRouter(svc, logger)
 	srv := server.NewServer(":8080", router, logger)
 

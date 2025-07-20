@@ -13,11 +13,11 @@ type StatusEvent struct {
 }
 
 type Service struct {
-	llm    *llm.Client
+	llm    llm.Interface
 	logger *zap.Logger
 }
 
-func NewService(llmClient *llm.Client, logger *zap.Logger) *Service {
+func NewService(llmClient llm.Interface, logger *zap.Logger) *Service {
 	return &Service{llm: llmClient, logger: logger}
 }
 

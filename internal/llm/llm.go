@@ -9,6 +9,10 @@ import (
 	"net/http"
 )
 
+type Interface interface {
+	Call(ctx context.Context, messages []ChatMessage) (string, error)
+}
+
 type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
