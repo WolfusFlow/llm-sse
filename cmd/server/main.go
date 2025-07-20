@@ -1,6 +1,7 @@
 package main
 
 import (
+	"llmsse/internal/llm"
 	"llmsse/internal/server"
 	"llmsse/internal/service"
 	"log"
@@ -16,7 +17,14 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
-	svc := service.NewService(nil, logger)
+	llmClient := llm.NewClient(
+		os.Getenv("LLM_KEY"),
+		"gpt-4o",
+		"https://api.openai.com",
+		logger,
+	)
+
+	svc := service.NewService(llmClient, logger)
 	router := server.NewRouter(svc, logger)
 	srv := server.NewServer(":8080", router, logger)
 
