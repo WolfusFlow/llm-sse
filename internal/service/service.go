@@ -48,6 +48,23 @@ func (s *Service) ProcessMessage(
 	tasks []PromptTask,
 	stream chan<- StatusEvent,
 ) error {
+
+	results, err := s.runTasksInParallel(ctx, messageID, conversationID, tasks, stream)
+	if err != nil {
+		return err
+	}
+
+	combinedInput := s.buildCombinedPrompt(results)
+
+	return s.streamCombinedLLM(ctx, messageID, conversationID, combinedInput, stream)
+}
+
+func (s *Service) runTasksInParallel(
+	ctx context.Context,
+	messageID, conversationID string,
+	tasks []PromptTask,
+	stream chan<- StatusEvent,
+) ([]LLMResult, error) {
 	llmResults := make(chan LLMResult, len(tasks))
 	wg := sync.WaitGroup{}
 
@@ -65,7 +82,7 @@ func (s *Service) ProcessMessage(
 				return
 			}
 
-			s.logger.Debug("Calling "+task.ID, zap.String("current time", time.Now().Format("3:04:05")))
+			s.logger.Debug("Calling "+task.ID, zap.String("time", time.Now().Format("3:04:05")))
 			stream <- StatusEvent{
 				MessageID:      messageID,
 				ConversationID: conversationID,
@@ -82,7 +99,7 @@ func (s *Service) ProcessMessage(
 				)
 				return
 			}
-			s.logger.Info("response llm", zap.String("task", task.ID), zap.String("resp", res), zap.Error(err))
+
 			if err != nil {
 				llmResults <- LLMResult{
 					ID:  task.ID,
@@ -95,7 +112,6 @@ func (s *Service) ProcessMessage(
 				ID:      task.ID,
 				Message: res,
 			}
-			s.logger.Debug("Called "+task.ID, zap.String("current time", time.Now().Format("3:04:05")))
 		}(task)
 	}
 
@@ -104,22 +120,40 @@ func (s *Service) ProcessMessage(
 		close(llmResults)
 	}()
 
-	// Build final combined input
-	builder := strings.Builder{}
+	var results []LLMResult
 	for res := range llmResults {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 		if res.Err != nil {
-			return fmt.Errorf("failed task %s: %w", res.ID, res.Err)
+			return nil, res.Err
 		}
+		results = append(results, res)
+	}
+
+	return results, nil
+}
+
+func (s *Service) buildCombinedPrompt(results []LLMResult) string {
+	var builder strings.Builder
+	for _, res := range results {
 		builder.WriteString(res.Message)
 		builder.WriteString("\n---\n")
 	}
+	return strings.TrimSuffix(builder.String(), "\n---\n")
+}
 
-	combinedInput := strings.TrimSuffix(builder.String(), "\n---\n")
+func (s *Service) streamCombinedLLM(
+	ctx context.Context,
+	messageID, conversationID string,
+	input string,
+	stream chan<- StatusEvent,
+) error {
+	s.logger.Debug("Combining LLM 3",
+		zap.String("time", time.Now().Format("3:04:05")),
+		zap.String("message", input),
+	)
 
-	s.logger.Debug("Combining LLM 3", zap.String("current time", time.Now().Format("3:04:05")), zap.String("message for llm combined", combinedInput))
 	stream <- StatusEvent{
 		MessageID:      messageID,
 		ConversationID: conversationID,
@@ -129,7 +163,7 @@ func (s *Service) ProcessMessage(
 
 	resultStream := s.llm.Stream(ctx, []llm.ChatMessage{
 		{Role: "system", Content: "You are LLM 3. Combine and summarize the following responses:"},
-		{Role: "user", Content: combinedInput},
+		{Role: "user", Content: input},
 	})
 
 	for res := range resultStream {
@@ -143,6 +177,7 @@ func (s *Service) ProcessMessage(
 		if res.Err != nil {
 			return res.Err
 		}
+
 		stream <- StatusEvent{
 			MessageID:      messageID,
 			ConversationID: conversationID,
@@ -160,6 +195,6 @@ func (s *Service) ProcessMessage(
 		Final:          true,
 	}
 
-	s.logger.Debug("Completed via LLM 3", zap.String("current time", time.Now().Format("3:04:05")))
+	s.logger.Debug("Completed via LLM 3", zap.String("time", time.Now().Format("3:04:05")))
 	return nil
 }
