@@ -12,8 +12,24 @@ import (
 )
 
 type StatusEvent struct {
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
+	MessageID      string `json:"message_id"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	Status         Status `json:"status"`
+	Source         string `json:"source,omitempty"`
+	Message        string `json:"message,omitempty"`
+}
+
+type Status string
+
+type PromptTask struct {
+	ID     string
+	Prompt []llm.ChatMessage
+}
+
+type LLMResult struct {
+	ID      string
+	Message string
+	Err     error
 }
 
 type Service struct {
@@ -21,91 +37,109 @@ type Service struct {
 	logger *zap.Logger
 }
 
-type LLMResult struct {
-	message string
-	err     error
-}
-
 func NewService(llmClient llm.Interface, logger *zap.Logger) *Service {
 	return &Service{llm: llmClient, logger: logger}
 }
 
-func (s *Service) ProcessMessage(ctx context.Context, msg string, stream chan<- StatusEvent) error {
-	llmResults := make(chan LLMResult, 2)
+func (s *Service) ProcessMessage(
+	ctx context.Context,
+	messageID, conversationID string,
+	tasks []PromptTask,
+	stream chan<- StatusEvent,
+) error {
+	llmResults := make(chan LLMResult, len(tasks))
 	wg := sync.WaitGroup{}
-	wg.Add(2)
 
-	go func() {
-		defer wg.Done()
-		s.logger.Debug("Calling LLM 1", zap.String("current time", time.Now().Format("3:04:05")))
-		stream <- StatusEvent{Status: "Sending to LLM 1"}
-		res1, err := s.llm.Call(ctx, []llm.ChatMessage{
-			{Role: "system", Content: "You are LLM 1"},
-			{Role: "user", Content: msg},
-		})
-		if err != nil {
-			llmResults <- LLMResult{
-				err: fmt.Errorf("LLM 1 failed: %w", err),
-			}
-			return
-		}
-		llmResults <- LLMResult{
-			message: res1,
-			err:     nil,
-		}
-		s.logger.Debug("Called LLM 1", zap.String("current time", time.Now().Format("3:04:05")))
-	}()
+	for _, task := range tasks {
+		wg.Add(1)
+		go func(task PromptTask) {
+			defer wg.Done()
 
-	go func() {
-		defer wg.Done()
-		s.logger.Debug("Calling LLM 2", zap.String("current time", time.Now().Format("3:04:05")))
-		stream <- StatusEvent{Status: "Sending to LLM 2"}
-		res2, err := s.llm.Call(ctx, []llm.ChatMessage{
-			{Role: "system", Content: "You are LLM 2"},
-			{Role: "user", Content: msg},
-		})
-		if err != nil {
-			llmResults <- LLMResult{
-				err: fmt.Errorf("LLM 2 failed: %w", err),
+			if ctx.Err() != nil {
+				s.logger.Warn("Skipping task due to cancelled context",
+					zap.String("task", task.ID),
+					zap.String("message_id", messageID),
+					zap.String("conversation_id", conversationID),
+				)
+				return
 			}
-			return
-		}
-		llmResults <- LLMResult{
-			message: res2,
-			err:     nil,
-		}
-		s.logger.Debug("Called LLM 2", zap.String("current time", time.Now().Format("3:04:05")))
-	}()
+
+			s.logger.Debug("Calling "+task.ID, zap.String("current time", time.Now().Format("3:04:05")))
+			stream <- StatusEvent{
+				MessageID:      messageID,
+				ConversationID: conversationID,
+				Status:         Status("Sending to " + task.ID),
+				Source:         task.ID,
+			}
+
+			res, err := s.llm.Call(ctx, task.Prompt)
+			if ctx.Err() != nil {
+				s.logger.Warn("Context cancelled during llm.Call",
+					zap.String("task", task.ID),
+					zap.String("message_id", messageID),
+					zap.String("conversation_id", conversationID),
+				)
+				return
+			}
+			if err != nil {
+				llmResults <- LLMResult{
+					ID:  task.ID,
+					Err: fmt.Errorf("%s failed: %w", task.ID, err),
+				}
+				return
+			}
+
+			llmResults <- LLMResult{
+				ID:      task.ID,
+				Message: res,
+			}
+			s.logger.Debug("Called "+task.ID, zap.String("current time", time.Now().Format("3:04:05")))
+		}(task)
+	}
 
 	go func() {
 		wg.Wait()
 		close(llmResults)
 	}()
 
+	// Build final combined input
 	builder := strings.Builder{}
 	for res := range llmResults {
-		if res.err != nil {
-			return res.err
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		builder.WriteString(res.message)
+		if res.Err != nil {
+			return fmt.Errorf("failed task %s: %w", res.ID, res.Err)
+		}
+		builder.WriteString(res.Message)
 		builder.WriteString("\n---\n")
 	}
 
-	combinedInput := builder.String()
-	combinedInput = strings.TrimSuffix(combinedInput, "\n---\n")
+	combinedInput := strings.TrimSuffix(builder.String(), "\n---\n")
 
 	s.logger.Debug("Combining LLM 3", zap.String("current time", time.Now().Format("3:04:05")))
+	stream <- StatusEvent{
+		MessageID:      messageID,
+		ConversationID: conversationID,
+		Status:         "Combining via LLM 3",
+		Source:         "llm-combine",
+	}
 
-	stream <- StatusEvent{Status: "Combining via LLM 3"}
 	combined, err := s.llm.Call(ctx, []llm.ChatMessage{
 		{Role: "system", Content: "You are LLM 3. Combine and summarize the following responses:"},
-		{Role: "user", Content: combinedInput}, //res1 + "\n---\n" + res2
+		{Role: "user", Content: combinedInput},
 	})
 	if err != nil {
 		return err
 	}
-	s.logger.Debug("Combined LLM 3", zap.String("current time", time.Now().Format("3:04:05")))
 
-	stream <- StatusEvent{Status: "Completed", Message: combined}
+	s.logger.Debug("Combined LLM 3", zap.String("current time", time.Now().Format("3:04:05")))
+	stream <- StatusEvent{
+		MessageID:      messageID,
+		ConversationID: conversationID,
+		Status:         "Completed",
+		Message:        combined,
+		Source:         "llm-combine"}
+
 	return nil
 }

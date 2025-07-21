@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
 
+	"llmsse/internal/llm"
 	"llmsse/internal/service"
 
 	"go.uber.org/zap"
@@ -16,7 +18,9 @@ type Handler struct {
 }
 
 type processRequest struct {
-	Message string `json:"message"`
+	Message        string `json:"message"`
+	MessageID      string `json:"message_id"`
+	ConversationID string `json:"conversation_id,omitempty"`
 }
 
 func (h *Handler) ProcessMessage(w http.ResponseWriter, r *http.Request) {
@@ -32,16 +36,26 @@ func (h *Handler) ProcessMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := r.Context()
-
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
 	eventChan := make(chan service.StatusEvent)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
 	go func() {
 		defer close(eventChan)
-		if err := h.svc.ProcessMessage(ctx, req.Message, eventChan); err != nil {
+
+		tasks := createPromptTasks(req.Message)
+
+		if err := h.svc.ProcessMessage(
+			r.Context(),
+			req.MessageID,
+			req.ConversationID,
+			tasks,
+			eventChan,
+		); err != nil {
 			h.logger.Error("processing message", zap.Error(err))
 			eventChan <- service.StatusEvent{
 				Status:  "error",
@@ -69,5 +83,24 @@ func (h *Handler) ProcessMessage(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 			time.Sleep(300 * time.Millisecond) // For small throttling
 		}
+	}
+}
+
+func createPromptTasks(message string) []service.PromptTask {
+	return []service.PromptTask{
+		{
+			ID: "llm-1",
+			Prompt: []llm.ChatMessage{
+				{Role: "system", Content: "You are LLM 1"},
+				{Role: "user", Content: message},
+			},
+		},
+		{
+			ID: "llm-2",
+			Prompt: []llm.ChatMessage{
+				{Role: "system", Content: "You are LLM 2"},
+				{Role: "user", Content: message},
+			},
+		},
 	}
 }
