@@ -1,11 +1,11 @@
 package main
 
 import (
-	"llmsse/internal/llm"
-	"llmsse/internal/server"
-	"llmsse/internal/service"
+	"context"
+	"llmsse/internal/app"
+	"llmsse/internal/config"
+	"llmsse/internal/logger"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,25 +14,19 @@ import (
 )
 
 func main() {
-	logger, _ := zap.NewProduction()
-	defer logger.Sync()
+	cfg := config.Load()
 
-	// llmClient := llm.NewClient(
-	// 	os.Getenv("LLM_KEY"),
-	// 	"gpt-4o",
-	// 	"https://api.openai.com",
-	// 	logger,
-	// )
+	logr, err := logger.New(cfg.LogLevel, cfg.Production)
+	if err != nil {
+		log.Fatalf("Failed to init logger: %v", err)
+	}
+	defer logr.Sync()
 
-	mockClient := llm.NewMockClient()
-
-	svc := service.NewService(mockClient, logger)
-	router := server.NewRouter(svc, logger)
-	srv := server.NewServer(":8080", router, logger)
+	application := app.New(cfg, logr)
 
 	go func() {
-		if err := srv.Run(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("Server error", zap.Error(err))
+		if err := application.Run(); err != nil {
+			logr.Fatal("Server error", zap.Error(err))
 		}
 	}()
 
@@ -40,7 +34,7 @@ func main() {
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 
-	if err := srv.Shutdown(nil); err != nil {
-		log.Fatalf("Server Shutdown: %v", err)
+	if err := application.Shutdown(context.Background()); err != nil {
+		logr.Fatal("Shutdown error", zap.Error(err))
 	}
 }
