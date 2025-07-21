@@ -17,6 +17,7 @@ type StatusEvent struct {
 	Status         Status `json:"status"`
 	Source         string `json:"source,omitempty"`
 	Message        string `json:"message,omitempty"`
+	Final          bool   `json:"final,omitempty"`
 }
 
 type Status string
@@ -81,6 +82,7 @@ func (s *Service) ProcessMessage(
 				)
 				return
 			}
+			s.logger.Info("response llm", zap.String("task", task.ID), zap.String("resp", res), zap.Error(err))
 			if err != nil {
 				llmResults <- LLMResult{
 					ID:  task.ID,
@@ -117,7 +119,7 @@ func (s *Service) ProcessMessage(
 
 	combinedInput := strings.TrimSuffix(builder.String(), "\n---\n")
 
-	s.logger.Debug("Combining LLM 3", zap.String("current time", time.Now().Format("3:04:05")))
+	s.logger.Debug("Combining LLM 3", zap.String("current time", time.Now().Format("3:04:05")), zap.String("message for llm combined", combinedInput))
 	stream <- StatusEvent{
 		MessageID:      messageID,
 		ConversationID: conversationID,
@@ -125,21 +127,39 @@ func (s *Service) ProcessMessage(
 		Source:         "llm-combine",
 	}
 
-	combined, err := s.llm.Call(ctx, []llm.ChatMessage{
+	resultStream := s.llm.Stream(ctx, []llm.ChatMessage{
 		{Role: "system", Content: "You are LLM 3. Combine and summarize the following responses:"},
 		{Role: "user", Content: combinedInput},
 	})
-	if err != nil {
-		return err
+
+	for res := range resultStream {
+		if ctx.Err() != nil {
+			s.logger.Warn("Context cancelled during llm.Stream",
+				zap.String("message_id", messageID),
+				zap.String("conversation_id", conversationID),
+			)
+			return ctx.Err()
+		}
+		if res.Err != nil {
+			return res.Err
+		}
+		stream <- StatusEvent{
+			MessageID:      messageID,
+			ConversationID: conversationID,
+			Status:         "Streaming",
+			Source:         "llm-combine",
+			Message:        res.Content,
+		}
 	}
 
-	s.logger.Debug("Combined LLM 3", zap.String("current time", time.Now().Format("3:04:05")))
 	stream <- StatusEvent{
 		MessageID:      messageID,
 		ConversationID: conversationID,
 		Status:         "Completed",
-		Message:        combined,
-		Source:         "llm-combine"}
+		Source:         "llm-combine",
+		Final:          true,
+	}
 
+	s.logger.Debug("Completed via LLM 3", zap.String("current time", time.Now().Format("3:04:05")))
 	return nil
 }

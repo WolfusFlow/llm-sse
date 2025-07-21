@@ -31,7 +31,9 @@ func (h *Handler) ProcessMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req processRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
+		req.Message == "" ||
+		req.MessageID == "" {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -41,7 +43,7 @@ func (h *Handler) ProcessMessage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 
 	eventChan := make(chan service.StatusEvent)
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 1*time.Minute)
 	defer cancel()
 
 	go func() {
@@ -81,7 +83,7 @@ func (h *Handler) ProcessMessage(w http.ResponseWriter, r *http.Request) {
 			}
 			w.Write([]byte("\n"))
 			flusher.Flush()
-			time.Sleep(300 * time.Millisecond) // For small throttling
+			// time.Sleep(300 * time.Millisecond) // For small throttling
 		}
 	}
 }
