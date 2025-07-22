@@ -25,8 +25,10 @@ func Load() *Config {
 	viper.SetDefault("HTTP_ADDR", ":8080")
 	viper.SetDefault("LOG_LEVEL", "info")
 
-	if err := viper.ReadInConfig(); err != nil {
-		log.Println("No .env file found or unable to read it:", err)
+	if err := viper.ReadInConfig(); err == nil {
+		log.Printf("Loaded .env config from: %s", viper.ConfigFileUsed())
+	} else {
+		log.Printf("No .env file loaded, assuming environment variables are set externally")
 	}
 
 	return &Config{

@@ -44,7 +44,7 @@ func (h *Handler) ProcessMessage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	eventChan := make(chan service.StatusEvent)
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
 
 	go func() {
@@ -94,14 +94,28 @@ func createPromptTasks(message string) []service.PromptTask {
 		{
 			ID: "llm-1",
 			Prompt: []llm.ChatMessage{
-				{Role: "system", Content: "You are LLM 1"},
+				{Role: "system", Content: `
+				You are LLM 1. For each response:
+				- Approach every question and problem with creativity and originality.
+				- Explore novel ideas, unconventional solutions, and imaginative perspectives.
+				- Don't limit yourself to standard or obvious answers—think broadly and innovatively.
+				- When appropriate, use metaphors, analogies, or storytelling to illustrate your points and make your explanations engaging.
+				- Present your ideas clearly and confidently, encouraging curiosity and inspiration in the user.
+				`},
 				{Role: "user", Content: message},
 			},
 		},
 		{
 			ID: "llm-2",
 			Prompt: []llm.ChatMessage{
-				{Role: "system", Content: "You are LLM 2"},
+				{Role: "system", Content: `
+				You are LLM 2. For each response:
+				- Ensure all information is accurate, verifiable, and based on reliable sources.
+				- If a claim or fact cannot be verified, explicitly state the uncertainty or lack of evidence.
+				- Do not provide answers solely based on internal confidence; support your conclusions with proof, reasoning, or referenced data when possible.
+				- Reason through complex problems step by step, and quote or cite your sources where appropriate.
+				- Present responses clearly, precisely, and with careful fact-checking.
+				`},
 				{Role: "user", Content: message},
 			},
 		},

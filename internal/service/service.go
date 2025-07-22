@@ -6,7 +6,6 @@ import (
 	"llmsse/internal/llm"
 	"strings"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 )
@@ -82,7 +81,7 @@ func (s *Service) runTasksInParallel(
 				return
 			}
 
-			s.logger.Debug("Calling "+task.ID, zap.String("time", time.Now().Format("3:04:05")))
+			s.logger.Debug("Calling " + task.ID)
 			stream <- StatusEvent{
 				MessageID:      messageID,
 				ConversationID: conversationID,
@@ -107,6 +106,12 @@ func (s *Service) runTasksInParallel(
 				}
 				return
 			}
+			s.logger.Debug("Response from LLM calling",
+				zap.String("message", res),
+				zap.String("task", task.ID),
+				zap.String("message_id", messageID),
+				zap.String("conversation_id", conversationID),
+			)
 
 			llmResults <- LLMResult{
 				ID:      task.ID,
@@ -150,9 +155,10 @@ func (s *Service) streamCombinedLLM(
 	stream chan<- StatusEvent,
 ) error {
 	s.logger.Debug("Combining LLM 3",
-		zap.String("time", time.Now().Format("3:04:05")),
 		zap.String("message", input),
-	)
+		zap.String("task", "llm-combine"),
+		zap.String("message_id", messageID),
+		zap.String("conversation_id", conversationID))
 
 	stream <- StatusEvent{
 		MessageID:      messageID,
@@ -195,6 +201,6 @@ func (s *Service) streamCombinedLLM(
 		Final:          true,
 	}
 
-	s.logger.Debug("Completed via LLM 3", zap.String("time", time.Now().Format("3:04:05")))
+	s.logger.Debug("Completed via LLM 3")
 	return nil
 }

@@ -17,5 +17,8 @@ test:
 test-coverage:
 	go test -coverprofile=coverage.out ./...
 
-test-coverage-visualize: test-coverage
+test-coverage-detailed: test-coverage
 	go tool cover -func=coverage.out
+
+test-coverage-visualize: test-coverage
+	go tool cover -html=coverage.out
