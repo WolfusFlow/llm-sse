@@ -10,3 +10,12 @@ service-logs:
 
 service-down:
 	docker compose down
+
+test:
+	go test -race ./...
+
+test-coverage:
+	go test -coverprofile=coverage.out ./...
+
+test-coverage-visualize: test-coverage
+	go tool cover -func=coverage.out
