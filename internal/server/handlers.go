@@ -41,9 +41,10 @@ func (h *Handler) ProcessMessage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	eventChan := make(chan service.StatusEvent)
-	ctx, cancel := context.WithTimeout(r.Context(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	go func() {
@@ -52,7 +53,7 @@ func (h *Handler) ProcessMessage(w http.ResponseWriter, r *http.Request) {
 		tasks := createPromptTasks(req.Message)
 
 		if err := h.svc.ProcessMessage(
-			r.Context(),
+			ctx,
 			req.MessageID,
 			req.ConversationID,
 			tasks,
